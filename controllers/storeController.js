@@ -3,6 +3,22 @@
 // 	res.cookie('name', 'Mars is cool', {maxAge: 900000});
 // 	next();
 // };
+const mongoose = require('mongoose');
+const Store = mongoose.model('Store')
+const multer = require('multer');
+const jimp = require('jimp');
+const uuid = require('uuid');
+const multerOptions = {
+	storage: multer.memoryStorage(),
+	fileFilter(req, file, next){
+		const isPhoto = file.mimetype.startsWith('image/');
+		if(isPhoto){
+			next(null, true);
+		} else {
+			next({message:'That filetype isn\'t allowed!'}, false);
+		}
+	}
+};
 
 exports.homePage = (req, res) =>{
 	res.render('index');
@@ -14,4 +30,91 @@ exports.addStore = (req, res) =>{
 		title: 'Add Store'
 	});
 };
+
+
+exports.upload = multer(multerOptions).single('photo');
+exports.resize = async (req, res, next) => {
+	if(!req.file){
+	console.log('4');
+		next();
+		return;
+	}
+	const extension = req.file.mimetype.split('/')[1];
+	req.body.photo = `${uuid.v4()}.${extension}`;
+	const photo = await jimp.read(req.file.buffer);
+	await photo.resize(800, jimp.AUTO);
+	await photo.write(`./public/uploads/${req.body.photo}`);
+	console.log('3');
+	next();
+};
+exports.createStore = async (req, res) =>{
+	// res.json(req.body);
+	const store = await(new Store(req.body)).save();
+	req.flash('success', `Successfully Created ${store.name}. Care to leave a review?`);
+	res.redirect(`/store/${store.slug}`);
+
+	// encased callbacks
+	// store.save(function(err, store){
+	// 	if(!err) {
+	// 		console.log('It worked!');
+	// 		res.redirect('/');
+	// 	}
+	// });
+
+	// chained promises
+	// store
+	// 	.save()
+	// 	.then(store => {
+	// 		// res.json(store);
+	// 		return Store.find()
+	// 	})
+	// 	.then(stores => {
+	// 		res.render('storeList', {stores:stores})
+	// 	})
+	// 	.catch(err => {
+	// 		throw Error(err);
+	// 	});
+};
+
+exports.getStores = async (req, res) => {
+	const stores = await Store.find();
+	console.log(stores);
+	res.render('stores', {title:'Stores', stores:stores});
+};
+
+exports.getStoreBySlug = async (req, res, next) => {
+	const store = await Store.findOne({slug:req.params.slug});
+	if(!store){
+		return next();
+	}
+
+	res.render('store', {store, title:store.name});
+};
+
+exports.editStore = async (req, res) => {
+	const store = await Store.findOne({_id: req.params.id});
+	console.log(store);
+	res.render('editStore', {title:`Edit ${store.name}`, store});
+};
+
+exports.updateStore = async (req, res) => {
+	req.body.location.type = 'Point';
+	const store = await Store.findOneAndUpdate({_id: req.params.id}, req.body, 
+	{ new: true, // return the new store instead of the old one
+    	runValidators: true
+  	}).exec();
+  req.flash('success', `Successfully updated <strong>${store.name}</strong>. <a href="/stores/${store.slug}">View Store →</a>`);
+  res.redirect(`/stores/${store._id}/edit`);
+};
+
+exports.getStoresByTag = async(req,res) => {
+	const tag = req.params.tag;
+	const tagQuery = tag || { $exists: true};
+	const tagsPromise = Store.getTagsList();
+	const storesPromise = Store.find({tags:tagQuery});
+	const [tags, stores] = await Promise.all([tagsPromise, storesPromise]);
+	// res.json(result);
+	res.render('tag', {tags:tags, title:'Tags', tag, stores});
+};
+	
 
