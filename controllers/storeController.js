@@ -48,6 +48,7 @@ exports.resize = async (req, res, next) => {
 	next();
 };
 exports.createStore = async (req, res) =>{
+	req.body.author = req.user._id;
 	// res.json(req.body);
 	const store = await(new Store(req.body)).save();
 	req.flash('success', `Successfully Created ${store.name}. Care to leave a review?`);
@@ -83,7 +84,7 @@ exports.getStores = async (req, res) => {
 };
 
 exports.getStoreBySlug = async (req, res, next) => {
-	const store = await Store.findOne({slug:req.params.slug});
+	const store = await Store.findOne({slug:req.params.slug}).populate('author');
 	if(!store){
 		return next();
 	}
@@ -91,9 +92,16 @@ exports.getStoreBySlug = async (req, res, next) => {
 	res.render('store', {store, title:store.name});
 };
 
+const confirmOwner = (store, user) =>{
+	if(!store.author.equals(user._id)){
+		throw Error('You must own a store in order to edit it!');
+	}
+};
+
 exports.editStore = async (req, res) => {
+
 	const store = await Store.findOne({_id: req.params.id});
-	console.log(store);
+	confirmOwner(store, req.user);
 	res.render('editStore', {title:`Edit ${store.name}`, store});
 };
 
@@ -116,5 +124,45 @@ exports.getStoresByTag = async(req,res) => {
 	// res.json(result);
 	res.render('tag', {tags:tags, title:'Tags', tag, stores});
 };
+
+exports.searchStores = async(req, res) => {
+	// res.json(req.query);
+	const stores = await Store.find({
+		$text: {
+			$search: req.query.q
+		}
+	}, {
+			score: {$meta: 'textScore'}
+		
+	})
+	.sort({
+		score: { $meta: 'textScore' }
+	})
+	.limit(5);
+
+	res.json(stores);
+};
+
+exports.mapStores = async (req, res) => {
+	const coordinates = [req.query.lng, req.query.lat].map(parseFloat);
+	const q = {
+		location:{
+			$near: {
+				$geometry: {
+					type:'Point',
+					coordinates: coordinates
+				},
+				$maxDistance: 10000 // 10km
+			}
+		}
+	};
+
+	const stores = await Store.find(q).select('slug name description location photo').limit(10);
+	res.json(stores);
+};
+
+exports.mapPage = (req, res) => {
+	res.render('map', {title:'Map'});
+}
 	
 
